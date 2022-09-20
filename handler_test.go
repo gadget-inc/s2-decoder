@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	"cloud.google.com/go/logging"
@@ -30,7 +31,19 @@ import (
 func TestHandler(t *testing.T) {
 	ctx := context.Background()
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "http://example.com", nil)
+	req := httptest.NewRequest("POST", "http://example.com", strings.NewReader(`{
+		"requestId": "124ab1c",
+		"caller": "//bigquery.googleapis.com/projects/myproject/jobs/myproject:US.bquxjob_5b4c112c_17961fafeaf",
+		"sessionUser": "test-user@test-company.com",
+		"userDefinedContext": {
+		 "key1": "value1",
+		 "key2": "v2"
+		},
+		"calls": [
+		 ["/wYAAFMyc1R3TwEFAAB4buQoYQ\u003d\u003d"],
+		 ["/wYAAFMyc1R3TwEFAABh9epjdg\u003d\u003d"]
+		]
+	 }`))
 	client, err := logging.NewClient(ctx, "projects/testing",
 		option.WithoutAuthentication(),
 		option.WithGRPCDialOption(

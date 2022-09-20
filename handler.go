@@ -15,20 +15,85 @@
 package main
 
 import (
-	"fmt"
+	"bytes"
+	"encoding/base64"
+	"encoding/json"
+	"io"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"cloud.google.com/go/logging"
+	"github.com/klauspost/compress/s2"
 )
 
+type query struct {
+	RequestID   string     `json:"request_id"`
+	Caller      string     `json:"caller"`
+	SessionUser string     `json:"sessionUser"`
+	Calls       [][]string `json:"calls"`
+}
+
+type response struct {
+	Replies []string `json:"replies"`
+}
+
+func decodeStream(src []byte) (string, error) {
+	dec := s2.NewReader(bytes.NewReader(src))
+	buf := new(strings.Builder)
+	_, err := io.Copy(buf, dec)
+
+	return buf.String(), err
+}
+
 func (a *App) Handler(w http.ResponseWriter, r *http.Request) {
+	var query query
+
+	err := json.NewDecoder(r.Body).Decode(&query)
+
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	a.log.Log(logging.Entry{
 		Severity: logging.Info,
 		HTTPRequest: &logging.HTTPRequest{
 			Request: r,
 		},
-		Labels:  map[string]string{"arbitraryField": "custom entry"},
-		Payload: "Structured logging example.",
+		Labels:  map[string]string{"caller": query.Caller, "length": strconv.Itoa(len(query.Calls))},
+		Payload: "processing request",
 	})
-	fmt.Fprintf(w, "Hello World!\n")
+
+	results := make([]string, len(query.Calls))
+
+	for i, s := range query.Calls {
+		compressed, err := base64.StdEncoding.DecodeString(s[0])
+
+		decoded, err := decodeStream(compressed)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		results[i] = decoded
+	}
+
+	response := response{Replies: results}
+	jsonResponse, jsonError := json.Marshal(response)
+
+	if jsonError != nil {
+		a.log.Log(logging.Entry{
+			Severity: logging.Info,
+			HTTPRequest: &logging.HTTPRequest{
+				Request: r,
+			},
+			Payload: "unable to encode json",
+		})
+		http.Error(w, err.Error(), http.StatusBadRequest)
+	} else {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(jsonResponse)
+	}
+
 }
